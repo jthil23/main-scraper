@@ -1,10 +1,7 @@
 import express from "express";
 import path from "path";
-import { fileURLToPath } from "url";
 import { getMetricsPool } from "../db/connection.js";
 import { getJobsStatus, toggleJob, updateJobSchedule, triggerJob } from "../scheduler.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 app.use(express.json());

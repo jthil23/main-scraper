@@ -138,7 +138,7 @@ function startTask(name: string): void {
 function stopTask(name: string): void {
   const task = activeTasks.get(name);
   if (task) {
-    task.destroy();
+    task.stop();
     activeTasks.delete(name);
   }
 }
