@@ -62,48 +62,29 @@ export async function scrapeStockPrices(): Promise<number> {
   const pool = getMetricsPool();
 
   try {
+    if (!config.finance.finnhubApiKey) throw new Error("FINNHUB_API_KEY not configured");
+
     const sourceId = await getSourceId("stock_tracker");
     const symbols = config.finance.stocks;
     let count = 0;
 
-    // Use Yahoo Finance v8 quote endpoint (no key required)
-    const res = await fetch(
-      `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols.join(",")}`,
-      { headers: { "User-Agent": "MainScraper/1.0" } }
-    );
+    for (const symbol of symbols) {
+      const res = await fetch(
+        `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${config.finance.finnhubApiKey}`,
+        { headers: { "User-Agent": "MainScraper/1.0" } }
+      );
+      if (!res.ok) throw new Error(`Finnhub error: ${res.status}`);
 
-    if (!res.ok) throw new Error(`Yahoo Finance error: ${res.status}`);
+      const data = await res.json() as { c: number; dp: number };
+      if (!data.c) continue; // no price (invalid symbol or market closed)
 
-    const data = await res.json() as {
-      quoteResponse: {
-        result: Array<{
-          symbol: string;
-          regularMarketPrice: number;
-          regularMarketVolume: number;
-          marketCap?: number;
-          regularMarketChangePercent: number;
-        }>;
-      };
-    };
-
-    for (const quote of data.quoteResponse.result || []) {
-      // Determine ticker_type based on symbol
-      const tickerType = quote.symbol.includes("-") ? "etf" :
-        ["SPY", "QQQ", "DIA", "IWM", "VTI", "VOO"].includes(quote.symbol) ? "etf" : "stock";
+      const tickerType = ["SPY", "QQQ", "DIA", "IWM", "VTI", "VOO"].includes(symbol) ? "etf" : "stock";
 
       await pool.execute(
         `INSERT INTO ticker_prices
          (source_id, symbol, ticker_type, price_usd, volume_24h, market_cap, change_pct_24h, recorded_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
-        [
-          sourceId,
-          quote.symbol,
-          tickerType,
-          quote.regularMarketPrice,
-          quote.regularMarketVolume,
-          quote.marketCap || null,
-          quote.regularMarketChangePercent,
-        ]
+         VALUES (?, ?, ?, ?, NULL, NULL, ?, NOW())`,
+        [sourceId, symbol, tickerType, data.c, data.dp]
       );
       count++;
     }

@@ -1,6 +1,7 @@
 import { startScheduler, runAllNow } from "./scheduler.js";
 import { closePools } from "./db/connection.js";
-import { initConfig } from "./config.js";
+import { initConfig, config } from "./config.js";
+import { startWebServer } from "./api/server.js";
 
 const args = process.argv.slice(2);
 const runNow = args.includes("--run-now");
@@ -22,13 +23,16 @@ async function main() {
 
   console.log("Mode: Scheduled (cron)\n");
 
+  // Start web dashboard
+  startWebServer(config.web.port);
+
   // Run an initial scrape on startup
   console.log("[Startup] Running initial scrape...\n");
   await runAllNow();
 
   // Then start the scheduler
   console.log("\n[Startup] Initial scrape complete, starting scheduler...\n");
-  startScheduler();
+  await startScheduler();
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {

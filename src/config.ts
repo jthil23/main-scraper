@@ -32,6 +32,7 @@ export const config = {
   finance: {
     stocks: (process.env.FINANCE_STOCKS || "AAPL,MSFT,GOOGL,AMZN,TSLA,NVDA,SPY,QQQ").split(","),
     cryptos: (process.env.FINANCE_CRYPTOS || "bitcoin,ethereum,solana,cardano,dogecoin").split(","),
+    finnhubApiKey: process.env.FINNHUB_API_KEY || "",
   },
   news: {
     feeds: (process.env.NEWS_FEEDS || [
@@ -43,6 +44,17 @@ export const config = {
   },
   server: {
     host: process.env.SERVER_HOST || "192.168.1.103",
+  },
+  web: {
+    port: parseInt(process.env.WEB_PORT || "3001"),
+  },
+  steam: {
+    apiKey: process.env.STEAM_API_KEY || "",
+    steamId: process.env.STEAM_ID || "",
+  },
+  github: {
+    token: process.env.GITHUB_TOKEN || "",
+    username: process.env.GITHUB_USERNAME || "",
   },
 };
 

@@ -206,6 +206,62 @@ CREATE TABLE IF NOT EXISTS scrape_log (
   INDEX idx_scrape_log (scraper, started_at)
 ) ENGINE=InnoDB;
 
+-- Persists per-job enabled state and schedule overrides
+CREATE TABLE IF NOT EXISTS scraper_jobs (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(100) NOT NULL UNIQUE,
+  schedule VARCHAR(50) NOT NULL,
+  enabled BOOLEAN DEFAULT TRUE,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_scraper_jobs_name (name)
+) ENGINE=InnoDB;
+
+-- ============================================================
+-- STEAM
+-- ============================================================
+INSERT IGNORE INTO data_sources (source_key, source_type, name, location, is_active) VALUES
+  ('steam', 'scraper', 'Steam', NULL, 1);
+
+CREATE TABLE IF NOT EXISTS steam_recent_games (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  source_id INT NOT NULL,
+  app_id INT NOT NULL,
+  name VARCHAR(300) NOT NULL,
+  playtime_2weeks_min INT DEFAULT 0,
+  playtime_forever_min INT NOT NULL,
+  recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_steam_app (app_id),
+  INDEX idx_steam_time (recorded_at)
+) ENGINE=InnoDB;
+
+-- ============================================================
+-- GITHUB
+-- ============================================================
+INSERT IGNORE INTO data_sources (source_key, source_type, name, location, is_active) VALUES
+  ('github', 'scraper', 'GitHub', NULL, 1);
+
+CREATE TABLE IF NOT EXISTS github_stats (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  source_id INT NOT NULL,
+  public_repos INT,
+  followers INT,
+  following INT,
+  recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_github_stats_time (recorded_at)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS github_pushes (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  source_id INT NOT NULL,
+  event_id VARCHAR(50) NOT NULL,
+  repo_name VARCHAR(200) NOT NULL,
+  branch VARCHAR(200),
+  commit_count INT,
+  pushed_at TIMESTAMP NOT NULL,
+  UNIQUE KEY uq_github_push (event_id),
+  INDEX idx_github_push_time (pushed_at)
+) ENGINE=InnoDB;
+
 -- ============================================================
 -- F1 EXTENDED (in JT-F1 database)
 -- ============================================================

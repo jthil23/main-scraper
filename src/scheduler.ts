@@ -3,130 +3,275 @@ import { scrapeCurrentWeather, scrapeAirQuality } from "./scrapers/weather.js";
 import { scrapeSensorReadings, scrapeDeviceTrackers, scrapeAutomations } from "./scrapers/homeassistant.js";
 import { scrapeAdGuardStats } from "./scrapers/adguard.js";
 import { scrapeLibraries, scrapeWatchHistory, scrapeActiveSessions } from "./scrapers/plex.js";
-import { scrapeFrigateEvents, scrapeFrigateStats } from "./scrapers/frigate.js";
 import { scrapePitStops, scrapeLapTimes, scrapeRaceWeather, scrapeTireStints } from "./scrapers/f1-extended.js";
 import { scrapeCryptoPrices, scrapeStockPrices } from "./scrapers/finance.js";
 import { scrapeNewsFeeds } from "./scrapers/news.js";
 import { scrapeSystemHealth, scrapeDockerContainers, scrapeInternetHealth } from "./scrapers/system.js";
+import { scrapeSteamGames } from "./scrapers/steam.js";
+import { scrapeGitHubActivity } from "./scrapers/github.js";
+import { getMetricsPool } from "./db/connection.js";
 
-interface ScheduledJob {
+interface JobDefinition {
+  name: string;
+  defaultSchedule: string;
+  fn: () => Promise<unknown>;
+}
+
+export interface JobStatus {
   name: string;
   schedule: string;
-  fn: () => Promise<unknown>;
+  enabled: boolean;
+  lastRun: string | null;
+  lastStatus: string | null;
+  lastRecords: number | null;
+  lastError: string | null;
 }
 
 const currentYear = new Date().getFullYear();
 
-const jobs: ScheduledJob[] = [
-  // ── Weather ── every 30 minutes
-  { name: "weather_current", schedule: "*/30 * * * *", fn: scrapeCurrentWeather },
-  { name: "air_quality", schedule: "0 */3 * * *", fn: scrapeAirQuality },
+// Source of truth for all job definitions
+const JOB_DEFINITIONS: JobDefinition[] = [
+  // ── Weather ──
+  { name: "weather_current", defaultSchedule: "*/30 * * * *", fn: scrapeCurrentWeather },
+  { name: "air_quality", defaultSchedule: "0 */3 * * *", fn: scrapeAirQuality },
 
-  // ── Home Assistant ── every 5 minutes for sensors, hourly for others
-  { name: "ha_sensors", schedule: "*/5 * * * *", fn: scrapeSensorReadings },
-  { name: "ha_device_tracker", schedule: "*/15 * * * *", fn: scrapeDeviceTrackers },
-  { name: "ha_automations", schedule: "0 * * * *", fn: scrapeAutomations },
+  // ── Home Assistant ──
+  { name: "ha_sensors", defaultSchedule: "*/5 * * * *", fn: scrapeSensorReadings },
+  { name: "ha_device_tracker", defaultSchedule: "*/15 * * * *", fn: scrapeDeviceTrackers },
+  { name: "ha_automations", defaultSchedule: "0 * * * *", fn: scrapeAutomations },
 
-  // ── AdGuard ── every hour
-  { name: "adguard", schedule: "5 * * * *", fn: scrapeAdGuardStats },
+  // ── AdGuard ──
+  { name: "adguard", defaultSchedule: "5 * * * *", fn: scrapeAdGuardStats },
 
-  // ── Plex ── sessions every 5min, history hourly, libraries daily
-  { name: "plex_sessions", schedule: "*/5 * * * *", fn: scrapeActiveSessions },
-  { name: "plex_history", schedule: "15 * * * *", fn: scrapeWatchHistory },
-  { name: "plex_libraries", schedule: "0 4 * * *", fn: scrapeLibraries },
+  // ── Plex ──
+  { name: "plex_sessions", defaultSchedule: "*/5 * * * *", fn: scrapeActiveSessions },
+  { name: "plex_history", defaultSchedule: "15 * * * *", fn: scrapeWatchHistory },
+  { name: "plex_libraries", defaultSchedule: "0 4 * * *", fn: scrapeLibraries },
 
-  // ── Frigate ── events every 15min, stats hourly
-  { name: "frigate_events", schedule: "*/15 * * * *", fn: scrapeFrigateEvents },
-  { name: "frigate_stats", schedule: "10 * * * *", fn: scrapeFrigateStats },
+  // ── F1 ──
+  { name: "f1_pitstops", defaultSchedule: "0 6 * * *", fn: () => scrapePitStops(currentYear) },
+  { name: "f1_laptimes", defaultSchedule: "0 7 * * *", fn: () => scrapeLapTimes(currentYear) },
+  { name: "f1_weather", defaultSchedule: "0 8 * * *", fn: () => scrapeRaceWeather(currentYear) },
+  { name: "f1_stints", defaultSchedule: "0 9 * * *", fn: () => scrapeTireStints(currentYear) },
 
-  // ── F1 ── daily check for new data (pit stops, laps, weather, stints)
-  { name: "f1_pitstops", schedule: "0 6 * * *", fn: () => scrapePitStops(currentYear) },
-  { name: "f1_laptimes", schedule: "0 7 * * *", fn: () => scrapeLapTimes(currentYear) },
-  { name: "f1_weather", schedule: "0 8 * * *", fn: () => scrapeRaceWeather(currentYear) },
-  { name: "f1_stints", schedule: "0 9 * * *", fn: () => scrapeTireStints(currentYear) },
+  // ── Finance ──
+  { name: "crypto", defaultSchedule: "20 * * * *", fn: scrapeCryptoPrices },
+  { name: "stocks", defaultSchedule: "0 17 * * 1-5", fn: scrapeStockPrices },
 
-  // ── Finance ── crypto every hour, stocks once daily (market hours)
-  { name: "crypto", schedule: "20 * * * *", fn: scrapeCryptoPrices },
-  { name: "stocks", schedule: "0 17 * * 1-5", fn: scrapeStockPrices },
+  // ── News ──
+  { name: "news", defaultSchedule: "30 */2 * * *", fn: scrapeNewsFeeds },
 
-  // ── News ── every 2 hours
-  { name: "news", schedule: "30 */2 * * *", fn: scrapeNewsFeeds },
+  // ── System ──
+  { name: "system_health", defaultSchedule: "*/5 * * * *", fn: scrapeSystemHealth },
+  { name: "docker_containers", defaultSchedule: "*/10 * * * *", fn: scrapeDockerContainers },
+  { name: "internet_health", defaultSchedule: "35 * * * *", fn: scrapeInternetHealth },
 
-  // ── System ── health every 5min, docker every 10min, internet hourly
-  { name: "system_health", schedule: "*/5 * * * *", fn: scrapeSystemHealth },
-  { name: "docker_containers", schedule: "*/10 * * * *", fn: scrapeDockerContainers },
-  { name: "internet_health", schedule: "35 * * * *", fn: scrapeInternetHealth },
+  // ── Steam ──
+  { name: "steam", defaultSchedule: "0 */6 * * *", fn: scrapeSteamGames },
+
+  // ── GitHub ──
+  { name: "github", defaultSchedule: "45 * * * *", fn: scrapeGitHubActivity },
 ];
 
-export function startScheduler(): void {
-  console.log("[Scheduler] Starting all cron jobs...\n");
+// Runtime state: name → { schedule, enabled }
+const jobState = new Map<string, { schedule: string; enabled: boolean }>();
 
-  for (const job of jobs) {
-    cron.schedule(job.schedule, async () => {
-      try {
-        await job.fn();
-      } catch (error) {
-        console.error(`[Scheduler] ${job.name} failed:`, error instanceof Error ? error.message : error);
-      }
-    });
-    console.log(`  ${job.name.padEnd(22)} ${job.schedule}`);
+// Active cron tasks: name → task
+const activeTasks = new Map<string, cron.ScheduledTask>();
+
+// Job definition lookup
+const jobDefs = new Map<string, JobDefinition>(
+  JOB_DEFINITIONS.map((j) => [j.name, j])
+);
+
+// ── DB persistence ────────────────────────────────────────────────────────────
+
+async function loadJobState(): Promise<void> {
+  const pool = getMetricsPool();
+
+  // Upsert all job definitions (adds new jobs, keeps existing state)
+  for (const job of JOB_DEFINITIONS) {
+    await pool.execute(
+      `INSERT INTO scraper_jobs (name, schedule, enabled)
+       VALUES (?, ?, TRUE)
+       ON DUPLICATE KEY UPDATE name=name`,
+      [job.name, job.defaultSchedule]
+    );
   }
 
-  console.log(`\n[Scheduler] ${jobs.length} jobs scheduled`);
+  const [rows] = await pool.execute("SELECT name, schedule, enabled FROM scraper_jobs");
+  for (const row of rows as Array<{ name: string; schedule: string; enabled: number }>) {
+    jobState.set(row.name, { schedule: row.schedule, enabled: !!row.enabled });
+  }
 }
+
+async function persistJobState(name: string): Promise<void> {
+  const state = jobState.get(name);
+  if (!state) return;
+  const pool = getMetricsPool();
+  await pool.execute(
+    "UPDATE scraper_jobs SET schedule=?, enabled=? WHERE name=?",
+    [state.schedule, state.enabled, name]
+  );
+}
+
+// ── Cron task management ──────────────────────────────────────────────────────
+
+function startTask(name: string): void {
+  const def = jobDefs.get(name);
+  const state = jobState.get(name);
+  if (!def || !state) return;
+
+  // Stop existing task if any
+  stopTask(name);
+
+  const task = cron.schedule(state.schedule, async () => {
+    try {
+      await def.fn();
+    } catch (error) {
+      console.error(`[Scheduler] ${name} failed:`, error instanceof Error ? error.message : error);
+    }
+  });
+  activeTasks.set(name, task);
+}
+
+function stopTask(name: string): void {
+  const task = activeTasks.get(name);
+  if (task) {
+    task.destroy();
+    activeTasks.delete(name);
+  }
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+export async function startScheduler(): Promise<void> {
+  console.log("[Scheduler] Loading job state from DB...");
+  await loadJobState();
+
+  console.log("[Scheduler] Starting enabled cron jobs...\n");
+  for (const job of JOB_DEFINITIONS) {
+    const state = jobState.get(job.name);
+    if (state?.enabled) {
+      startTask(job.name);
+      console.log(`  ${job.name.padEnd(22)} ${state.schedule}`);
+    } else {
+      console.log(`  ${job.name.padEnd(22)} (disabled)`);
+    }
+  }
+
+  const enabledCount = [...jobState.values()].filter((s) => s.enabled).length;
+  console.log(`\n[Scheduler] ${enabledCount}/${JOB_DEFINITIONS.length} jobs scheduled`);
+}
+
+export async function toggleJob(name: string): Promise<boolean> {
+  const state = jobState.get(name);
+  if (!state) throw new Error(`Unknown job: ${name}`);
+
+  state.enabled = !state.enabled;
+  await persistJobState(name);
+
+  if (state.enabled) {
+    startTask(name);
+    console.log(`[Scheduler] Enabled: ${name}`);
+  } else {
+    stopTask(name);
+    console.log(`[Scheduler] Disabled: ${name}`);
+  }
+
+  return state.enabled;
+}
+
+export async function updateJobSchedule(name: string, schedule: string): Promise<void> {
+  if (!cron.validate(schedule)) throw new Error(`Invalid cron expression: ${schedule}`);
+
+  const state = jobState.get(name);
+  if (!state) throw new Error(`Unknown job: ${name}`);
+
+  state.schedule = schedule;
+  await persistJobState(name);
+
+  if (state.enabled) {
+    startTask(name); // restart with new schedule
+    console.log(`[Scheduler] Rescheduled ${name}: ${schedule}`);
+  }
+}
+
+export async function triggerJob(name: string): Promise<void> {
+  const def = jobDefs.get(name);
+  if (!def) throw new Error(`Unknown job: ${name}`);
+  console.log(`[Scheduler] Manual trigger: ${name}`);
+  await def.fn();
+}
+
+export async function getJobsStatus(): Promise<JobStatus[]> {
+  const pool = getMetricsPool();
+  const [logRows] = await pool.execute(`
+    SELECT scraper, started_at, status, records_written, error_message
+    FROM scrape_log
+    WHERE (scraper, started_at) IN (
+      SELECT scraper, MAX(started_at)
+      FROM scrape_log
+      GROUP BY scraper
+    )
+  `);
+
+  const lastRuns = new Map<string, { started_at: Date; status: string; records_written: number; error_message: string | null }>();
+  for (const row of logRows as Array<{ scraper: string; started_at: Date; status: string; records_written: number; error_message: string | null }>) {
+    lastRuns.set(row.scraper, row);
+  }
+
+  return JOB_DEFINITIONS.map((def) => {
+    const state = jobState.get(def.name) ?? { schedule: def.defaultSchedule, enabled: true };
+    const last = lastRuns.get(def.name) ?? null;
+    return {
+      name: def.name,
+      schedule: state.schedule,
+      enabled: state.enabled,
+      lastRun: last?.started_at?.toISOString() ?? null,
+      lastStatus: last?.status ?? null,
+      lastRecords: last?.records_written ?? null,
+      lastError: last?.error_message ?? null,
+    };
+  });
+}
+
+// ── Startup run (used by index.ts) ───────────────────────────────────────────
 
 export async function runAllNow(): Promise<void> {
   console.log("[Runner] Executing all scrapers now...\n");
 
-  // Group 1: Independent scrapers (run in parallel)
-  const independentJobs = [
-    { name: "weather_current", fn: scrapeCurrentWeather },
-    { name: "air_quality", fn: scrapeAirQuality },
-    { name: "ha_sensors", fn: scrapeSensorReadings },
-    { name: "ha_device_tracker", fn: scrapeDeviceTrackers },
-    { name: "ha_automations", fn: scrapeAutomations },
-    { name: "adguard", fn: scrapeAdGuardStats },
-    { name: "plex_sessions", fn: scrapeActiveSessions },
-    { name: "plex_history", fn: scrapeWatchHistory },
-    { name: "plex_libraries", fn: scrapeLibraries },
-    { name: "frigate_events", fn: scrapeFrigateEvents },
-    { name: "frigate_stats", fn: scrapeFrigateStats },
-    { name: "crypto", fn: scrapeCryptoPrices },
-    { name: "stocks", fn: scrapeStockPrices },
-    { name: "news", fn: scrapeNewsFeeds },
-    { name: "system_health", fn: scrapeSystemHealth },
-    { name: "docker_containers", fn: scrapeDockerContainers },
-    { name: "internet_health", fn: scrapeInternetHealth },
-  ];
+  const enabledJobs = JOB_DEFINITIONS.filter((j) => {
+    const state = jobState.get(j.name);
+    // If state not loaded yet (first startup call), run all non-F1 jobs
+    return state ? state.enabled : true;
+  }).filter((j) => !j.name.startsWith("f1_"));
 
   const results = await Promise.allSettled(
-    independentJobs.map(async (job) => {
+    enabledJobs.map(async (job) => {
       try {
-        const count = await job.fn();
-        return { name: job.name, count };
+        await job.fn();
       } catch (error) {
         console.error(`[Runner] ${job.name} failed:`, error instanceof Error ? error.message : error);
-        return { name: job.name, count: 0 };
       }
     })
   );
 
   console.log("\n[Runner] Independent scrapers complete");
 
-  // Group 2: F1 scrapers (sequential to avoid rate limits)
+  // F1 scrapers run sequentially to avoid rate limits
   console.log("[Runner] Running F1 scrapers...");
-  for (const fn of [
-    () => scrapePitStops(currentYear),
-    () => scrapeLapTimes(currentYear),
-    () => scrapeRaceWeather(currentYear),
-    () => scrapeTireStints(currentYear),
-  ]) {
+  const f1Jobs = JOB_DEFINITIONS.filter((j) => j.name.startsWith("f1_"));
+  for (const job of f1Jobs) {
+    const state = jobState.get(job.name);
+    if (state && !state.enabled) continue;
     try {
-      await fn();
+      await job.fn();
     } catch (error) {
       console.error("[Runner] F1 scraper failed:", error instanceof Error ? error.message : error);
     }
   }
 
+  void results; // suppress unused warning
   console.log("\n[Runner] All scrapers complete!");
 }

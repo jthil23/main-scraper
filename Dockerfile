@@ -24,4 +24,7 @@ RUN npm ci --omit=dev
 # Copy compiled output from builder
 COPY --from=builder /app/dist ./dist
 
+# Copy static assets (not compiled by tsc)
+COPY --from=builder /app/src/api/public ./dist/api/public
+
 CMD ["node", "dist/index.js"]

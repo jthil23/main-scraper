@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Main Scraper</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #1a1d2e;
+      border-bottom: 1px solid #2d3148;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header h1 { font-size: 18px; font-weight: 600; color: #f8fafc; }
+    header .subtitle { font-size: 13px; color: #64748b; }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #22c55e;
+      box-shadow: 0 0 6px #22c55e;
+      flex-shrink: 0;
+    }
+
+    main { padding: 24px; max-width: 1400px; margin: 0 auto; }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .section-title { font-size: 14px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: .05em; }
+
+    /* ── Jobs table ── */
+    .jobs-table-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid #1e2136; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    thead tr { background: #151828; }
+    th { padding: 10px 14px; text-align: left; color: #64748b; font-weight: 500; white-space: nowrap; }
+    tbody tr { border-top: 1px solid #1e2136; transition: background .1s; }
+    tbody tr:hover { background: #131626; }
+    td { padding: 10px 14px; vertical-align: middle; }
+
+    .job-name { font-weight: 500; color: #cbd5e1; font-family: "SF Mono", "Fira Code", monospace; }
+
+    /* Toggle */
+    .toggle { position: relative; display: inline-block; width: 36px; height: 20px; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; inset: 0; cursor: pointer;
+      background: #374151; border-radius: 20px; transition: .2s;
+    }
+    .slider::before {
+      content: ""; position: absolute;
+      height: 14px; width: 14px; left: 3px; bottom: 3px;
+      background: white; border-radius: 50%; transition: .2s;
+    }
+    input:checked + .slider { background: #3b82f6; }
+    input:checked + .slider::before { transform: translateX(16px); }
+
+    /* Schedule input */
+    .schedule-wrap { display: flex; align-items: center; gap: 6px; }
+    .schedule-input {
+      background: #1e2136; border: 1px solid #2d3148; color: #e2e8f0;
+      border-radius: 4px; padding: 4px 8px; font-family: "SF Mono", "Fira Code", monospace;
+      font-size: 12px; width: 150px;
+    }
+    .schedule-input:focus { outline: none; border-color: #3b82f6; }
+    .btn-save {
+      background: #1e3a5f; border: 1px solid #2d5a8e; color: #60a5fa;
+      border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+      display: none;
+    }
+    .btn-save:hover { background: #2d5a8e; }
+    .schedule-input:focus ~ .btn-save, .btn-save.visible { display: inline-block; }
+
+    /* Status badge */
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 4px;
+      font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+    }
+    .badge-success { background: #14532d; color: #4ade80; }
+    .badge-error   { background: #450a0a; color: #f87171; }
+    .badge-none    { color: #475569; font-style: italic; }
+
+    /* Run button */
+    .btn-run {
+      background: transparent; border: 1px solid #2d3148; color: #94a3b8;
+      border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+      transition: .15s;
+    }
+    .btn-run:hover { border-color: #3b82f6; color: #60a5fa; background: #1e3a5f22; }
+    .btn-run:disabled { opacity: .4; cursor: default; }
+
+    .last-run { color: #64748b; white-space: nowrap; }
+    .records { color: #94a3b8; }
+    .error-cell { color: #f87171; font-size: 12px; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* ── Logs ── */
+    .logs-section { margin-top: 32px; }
+    .logs-controls { display: flex; gap: 8px; align-items: center; }
+    .logs-filter {
+      background: #1e2136; border: 1px solid #2d3148; color: #e2e8f0;
+      border-radius: 4px; padding: 6px 10px; font-size: 13px;
+    }
+    .logs-filter:focus { outline: none; border-color: #3b82f6; }
+    .btn-refresh {
+      background: #1e2136; border: 1px solid #2d3148; color: #94a3b8;
+      border-radius: 4px; padding: 6px 12px; font-size: 13px; cursor: pointer;
+    }
+    .btn-refresh:hover { border-color: #3b82f6; color: #60a5fa; }
+
+    .logs-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid #1e2136; margin-top: 12px; max-height: 480px; overflow-y: auto; }
+    .log-entry {
+      display: grid;
+      grid-template-columns: 130px 120px 70px 60px 1fr;
+      gap: 0;
+      border-top: 1px solid #1e2136;
+      padding: 8px 14px;
+      font-size: 12px;
+      align-items: center;
+    }
+    .log-entry:first-child { border-top: none; }
+    .log-entry:hover { background: #131626; }
+    .log-entry .log-time { color: #64748b; font-family: monospace; }
+    .log-entry .log-scraper { font-family: monospace; color: #cbd5e1; }
+    .log-entry .log-records { color: #94a3b8; }
+    .log-entry .log-err { color: #f87171; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .empty-state { padding: 40px; text-align: center; color: #475569; font-size: 14px; }
+    .loading { opacity: .5; }
+
+    /* Toast */
+    #toast {
+      position: fixed; bottom: 24px; right: 24px;
+      background: #1e2136; border: 1px solid #2d3148;
+      color: #e2e8f0; padding: 10px 16px; border-radius: 6px;
+      font-size: 13px; opacity: 0; transition: opacity .2s;
+      pointer-events: none;
+    }
+    #toast.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="status-dot" id="statusDot"></div>
+    <div>
+      <h1>Main Scraper</h1>
+      <div class="subtitle" id="headerSub">Loading...</div>
+    </div>
+  </header>
+
+  <main>
+    <div class="section-header">
+      <span class="section-title">Scraper Jobs</span>
+    </div>
+    <div class="jobs-table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Job</th>
+            <th>Enabled</th>
+            <th>Schedule</th>
+            <th>Last Run</th>
+            <th>Status</th>
+            <th>Records</th>
+            <th>Last Error</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="jobsBody">
+          <tr><td colspan="8" class="empty-state loading">Loading jobs...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="logs-section">
+      <div class="section-header">
+        <span class="section-title">Scrape Log</span>
+        <div class="logs-controls">
+          <select class="logs-filter" id="logFilter">
+            <option value="">All scrapers</option>
+          </select>
+          <button class="btn-refresh" onclick="loadLogs()">Refresh</button>
+        </div>
+      </div>
+      <div class="logs-wrap" id="logsWrap">
+        <div class="empty-state loading">Loading logs...</div>
+      </div>
+    </div>
+  </main>
+
+  <div id="toast"></div>
+
+  <script>
+    function toast(msg, isError = false) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.style.borderColor = isError ? '#7f1d1d' : '#2d3148';
+      el.style.color = isError ? '#f87171' : '#e2e8f0';
+      el.classList.add('show');
+      setTimeout(() => el.classList.remove('show'), 2500);
+    }
+
+    function relativeTime(isoStr) {
+      if (!isoStr) return '—';
+      const diff = Date.now() - new Date(isoStr).getTime();
+      const m = Math.floor(diff / 60000);
+      if (m < 1) return 'just now';
+      if (m < 60) return `${m}m ago`;
+      const h = Math.floor(m / 60);
+      if (h < 24) return `${h}h ago`;
+      return `${Math.floor(h / 24)}d ago`;
+    }
+
+    function formatTime(isoStr) {
+      if (!isoStr) return '—';
+      const d = new Date(isoStr);
+      return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    async function loadJobs() {
+      const res = await fetch('/api/jobs');
+      const jobs = await res.json();
+
+      const sub = document.getElementById('headerSub');
+      const enabled = jobs.filter(j => j.enabled).length;
+      sub.textContent = `${enabled}/${jobs.length} jobs active`;
+
+      // Populate log filter
+      const filter = document.getElementById('logFilter');
+      const existing = new Set([...filter.options].map(o => o.value));
+      for (const job of jobs) {
+        if (!existing.has(job.name)) {
+          const opt = document.createElement('option');
+          opt.value = job.name;
+          opt.textContent = job.name;
+          filter.appendChild(opt);
+        }
+      }
+
+      const tbody = document.getElementById('jobsBody');
+      tbody.innerHTML = '';
+      for (const job of jobs) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="job-name">${job.name}</td>
+          <td>
+            <label class="toggle">
+              <input type="checkbox" ${job.enabled ? 'checked' : ''} onchange="handleToggle('${job.name}', this)">
+              <span class="slider"></span>
+            </label>
+          </td>
+          <td>
+            <div class="schedule-wrap">
+              <input class="schedule-input" type="text" value="${job.schedule}"
+                     onkeydown="if(event.key==='Enter')handleSchedule('${job.name}',this)"
+                     oninput="this.nextElementSibling.classList.add('visible')"
+                     title="Cron expression">
+              <button class="btn-save" onclick="handleSchedule('${job.name}',this.previousElementSibling)">Save</button>
+            </div>
+          </td>
+          <td class="last-run" title="${job.lastRun || ''}">${relativeTime(job.lastRun)}</td>
+          <td>${job.lastStatus
+            ? `<span class="badge badge-${job.lastStatus === 'success' ? 'success' : 'error'}">${job.lastStatus}</span>`
+            : '<span class="badge-none">never</span>'}</td>
+          <td class="records">${job.lastRecords ?? '—'}</td>
+          <td class="error-cell" title="${job.lastError || ''}">${job.lastError || ''}</td>
+          <td><button class="btn-run" onclick="handleRun('${job.name}', this)">Run</button></td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function handleToggle(name, checkbox) {
+      checkbox.disabled = true;
+      try {
+        const res = await fetch(`/api/jobs/${name}/toggle`, { method: 'POST' });
+        const data = await res.json();
+        checkbox.checked = data.enabled;
+        toast(`${name} ${data.enabled ? 'enabled' : 'disabled'}`);
+        document.getElementById('headerSub').textContent = '...';
+        loadJobs();
+      } catch {
+        toast('Toggle failed', true);
+        checkbox.checked = !checkbox.checked;
+      }
+      checkbox.disabled = false;
+    }
+
+    async function handleSchedule(name, input) {
+      const schedule = input.value.trim();
+      try {
+        const res = await fetch(`/api/jobs/${name}/schedule`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ schedule }),
+        });
+        if (!res.ok) { const d = await res.json(); throw new Error(d.error); }
+        toast(`${name} schedule updated`);
+        input.nextElementSibling?.classList.remove('visible');
+      } catch (e) {
+        toast(e.message || 'Invalid schedule', true);
+      }
+    }
+
+    async function handleRun(name, btn) {
+      btn.disabled = true;
+      btn.textContent = '...';
+      try {
+        await fetch(`/api/jobs/${name}/run`, { method: 'POST' });
+        toast(`${name} triggered`);
+        setTimeout(() => { btn.disabled = false; btn.textContent = 'Run'; loadJobs(); }, 3000);
+      } catch {
+        toast('Run failed', true);
+        btn.disabled = false;
+        btn.textContent = 'Run';
+      }
+    }
+
+    async function loadLogs() {
+      const scraper = document.getElementById('logFilter').value;
+      const url = '/api/logs?limit=200' + (scraper ? `&scraper=${scraper}` : '');
+      const res = await fetch(url);
+      const logs = await res.json();
+
+      const wrap = document.getElementById('logsWrap');
+      if (!logs.length) { wrap.innerHTML = '<div class="empty-state">No log entries</div>'; return; }
+
+      wrap.innerHTML = logs.map(l => `
+        <div class="log-entry">
+          <span class="log-time">${formatTime(l.started_at)}</span>
+          <span class="log-scraper">${l.scraper}</span>
+          <span class="badge badge-${l.status === 'success' ? 'success' : 'error'}">${l.status}</span>
+          <span class="log-records">${l.records_written ?? 0} rec</span>
+          <span class="log-err">${l.error_message || ''}</span>
+        </div>
+      `).join('');
+    }
+
+    document.getElementById('logFilter').addEventListener('change', loadLogs);
+
+    // Initial load
+    loadJobs();
+    loadLogs();
+
+    // Auto-refresh jobs every 30s
+    setInterval(loadJobs, 30000);
+  </script>
+</body>
+</html>

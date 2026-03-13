@@ -4,6 +4,8 @@ services:
     pull_policy: always
     container_name: main-scraper
     env_file: .env
+    ports:
+      - "3001:3001"
     restart: unless-stopped
     networks:
       - default
