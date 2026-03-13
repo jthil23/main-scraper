@@ -1,0 +1,13 @@
+services:
+  main-scraper:
+    image: jthil23/main-scraper:latest
+    pull_policy: always
+    container_name: main-scraper
+    env_file: .env
+    restart: unless-stopped
+    networks:
+      - default
+
+networks:
+  default:
+    driver: bridge
