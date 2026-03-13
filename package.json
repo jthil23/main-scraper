@@ -1,0 +1,24 @@
+{
+  "name": "main-scraper",
+  "version": "1.0.0",
+  "description": "Unified data scraper for Unraid server - weather, HA, Plex, AdGuard, Frigate, F1, finance, news, system health",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "scrape": "tsx src/index.ts --run-now"
+  },
+  "dependencies": {
+    "mysql2": "^3.11.0",
+    "node-cron": "^3.0.3",
+    "rss-parser": "^3.13.0",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/node-cron": "^3.0.11",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
